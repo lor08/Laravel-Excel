@@ -2,6 +2,7 @@
 
 namespace Maatwebsite\Excel;
 
+use Illuminate\Bus\Batch;
 use Illuminate\Bus\Queueable;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -9,6 +10,9 @@ use Illuminate\Foundation\Bus\PendingDispatch;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\Jobs\SyncJob;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
+use Maatwebsite\Excel\Concerns\ShouldQueueWithBatch;
 use Maatwebsite\Excel\Concerns\ShouldQueueWithoutChain;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithEvents;
@@ -38,7 +42,7 @@ class ChunkReader
      * @param  WithChunkReading  $import
      * @param  Reader  $reader
      * @param  TemporaryFile  $temporaryFile
-     * @return \Illuminate\Foundation\Bus\PendingDispatch|null
+     * @return \Illuminate\Bus\Batch|PendingDispatch|null
      */
     public function read(WithChunkReading $import, Reader $reader, TemporaryFile $temporaryFile)
     {
@@ -83,13 +87,26 @@ class ChunkReader
 
         $afterImportJob = new AfterImportJob($import, $reader);
 
-        if ($import instanceof ShouldQueueWithoutChain) {
-            $jobs->push($afterImportJob->delay($delayCleanup));
+		if ($import instanceof ShouldQueueWithBatch) {
+			$batch = Bus::batch(
+				$jobs->toArray(),
+			)->finally(function (Batch $batch) use ($afterImportJob) {
+				dispatch($afterImportJob);
+			})->onQueue($queue)->dispatch();
 
-            return $jobs->each(function ($job) use ($queue) {
-                dispatch($job->onQueue($queue));
-            });
-        }
+			$import->setBatchId($batch->id);
+
+			return null;
+		}
+
+		if ($import instanceof ShouldQueueWithoutChain) {
+
+			$jobs->push($afterImportJob->delay($delayCleanup));
+
+			return $jobs->each(function ($job) use ($queue) {
+				dispatch($job->onQueue($queue));
+			});
+		}
 
         $jobs->push($afterImportJob);
 

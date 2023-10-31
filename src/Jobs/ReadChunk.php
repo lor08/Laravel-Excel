@@ -2,6 +2,7 @@
 
 namespace Maatwebsite\Excel\Jobs;
 
+use Illuminate\Bus\Batchable;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
@@ -22,7 +23,7 @@ use Throwable;
 
 class ReadChunk implements ShouldQueue
 {
-    use Queueable, HasEventBus, InteractsWithQueue;
+	use Batchable, Queueable, HasEventBus, InteractsWithQueue;
 
     /**
      * @var int
@@ -131,9 +132,13 @@ class ReadChunk implements ShouldQueue
      */
     public function handle(TransactionHandler $transaction)
     {
-        if (method_exists($this->import, 'setChunkOffset')) {
-            $this->import->setChunkOffset($this->startRow);
-        }
+		if (method_exists($this, 'batch') && $this->batch()?->cancelled()) {
+			return;
+		}
+
+		if (method_exists($this->import, 'setChunkOffset')) {
+			$this->import->setChunkOffset($this->startRow);
+		}
 
         if (method_exists($this->sheetImport, 'setChunkOffset')) {
             $this->sheetImport->setChunkOffset($this->startRow);
